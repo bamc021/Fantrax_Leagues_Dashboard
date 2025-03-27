@@ -24,34 +24,56 @@ def MLB_stats_import():
     MLB_hitting_request = safe_request(url="https://www.fangraphs.com/api/leaders/major-league/data?age=&pos=all&stats=bat&lg=all&qual=0&season=2024&season1=2024&startdate=2024-03-01&enddate=2024-11-01&month=0&hand=&team=0&pageitems=2000000000&pagenum=1&ind=0&rost=0&players=&type=8&postseason=&sortdir=default&sortstat=WAR")
     MLB_hitting_response = MLB_hitting_request
     MLB_hitting_df = pd.json_normalize(MLB_hitting_response['data'])
+    
+    # Remove unnecessary columns but keep playerid for mapping
     MLB_hitting_df.drop(['Name','Team','TeamName','PlayerNameRoute','position','teamid'],axis=1,inplace=True)
-    MLB_hitting_df = (
-        MLB_hitting_df[MLB_hitting_df['playerid'].isin(ss.idkey['IDFANGRAPHS']) & (MLB_hitting_df['PA'] > 0)]
-        .reset_index(drop=True)
+    
+    # Only filter by PA > 0, don't filter by ID yet
+    MLB_hitting_df = MLB_hitting_df[MLB_hitting_df['PA'] > 0].reset_index(drop=True)
+    
+    # Convert playerid to string to ensure consistent data type
+    MLB_hitting_df['playerid'] = MLB_hitting_df['playerid'].astype(str)
+    
+    # Ensure idkey has string FanGraphs IDs
+    ss.idkey['IDFANGRAPHS'] = ss.idkey['IDFANGRAPHS'].astype(str)
+    
+    # Create a mapping dictionary for better error handling - with string keys
+    id_mapping = ss.idkey.set_index('IDFANGRAPHS')['FANTRAXID'].to_dict()
+    
+    # Map Fantrax_ID more safely, handling missing IDs
+    MLB_hitting_df['Fantrax_ID'] = MLB_hitting_df['playerid'].apply(
+        lambda x: id_mapping.get(x, None)
     )
-    duplicates = ss.idkey[ss.idkey['IDFANGRAPHS'].duplicated()]
-    if not duplicates.empty:
-        print("Duplicate entries in 'IDFANGRAPHS':")
-        print(duplicates)
-    MLB_hitting_df['Fantrax_ID'] = MLB_hitting_df.playerid.map(ss.idkey.set_index('IDFANGRAPHS')['FANTRAXID'])
+    
+    # Calculate derived fields
     MLB_hitting_df['Swings'] = round(MLB_hitting_df['Pitches']*MLB_hitting_df['Swing%'])
 
+    # Organize columns
     nonleadingcols = [col for col in MLB_hitting_df.columns if col not in leadingcols]
     MLB_hitting_df = MLB_hitting_df[leadingcols + nonleadingcols]
     MLB_hitting_df = MLB_hitting_df.rename(columns={'PlayerName':'Player','TeamNameAbb':'MLBTeam'})
 
+    # Repeat for pitching
     MLB_pitching_request = safe_request(url="https://www.fangraphs.com/api/leaders/major-league/data?age=&pos=all&stats=pit&lg=all&qual=0&season=2024&season1=2024&startdate=2024-03-01&enddate=2024-11-01&month=0&hand=&team=0&pageitems=2000000000&pagenum=1&ind=0&rost=0&players=&type=8&postseason=&sortdir=default&sortstat=WAR")
     MLB_pitching_response = MLB_pitching_request
     MLB_pitching_df = pd.json_normalize(MLB_pitching_response['data'])
     MLB_pitching_df.drop(['Name','Team','TeamName','PlayerNameRoute','position','teamid'],axis=1,inplace=True)
-    MLB_pitching_df = (
-        MLB_pitching_df[MLB_pitching_df['playerid'].isin(ss.idkey['IDFANGRAPHS']) & (MLB_pitching_df['IP'] > 0)]
-        .reset_index(drop=True)
-    )
-    MLB_pitching_df['Fantrax_ID'] = MLB_pitching_df.playerid.map(ss.idkey.set_index('IDFANGRAPHS')['FANTRAXID'])
     
+    # Only filter by IP > 0, don't filter by ID yet
+    MLB_pitching_df = MLB_pitching_df[MLB_pitching_df['IP'] > 0].reset_index(drop=True)
+    
+    # Convert playerid to string to ensure consistent data type
+    MLB_pitching_df['playerid'] = MLB_pitching_df['playerid'].astype(str)
+    
+    # Map Fantrax_ID more safely for pitchers
+    MLB_pitching_df['Fantrax_ID'] = MLB_pitching_df['playerid'].apply(
+        lambda x: id_mapping.get(x, None)
+    )
+    
+    # Calculate derived fields
     MLB_pitching_df['Swings'] = round(MLB_pitching_df['Pitches']*MLB_pitching_df['Swing%'])
 
+    # Organize columns
     nonleadingcols = [col for col in MLB_pitching_df.columns if col not in leadingcols]
     MLB_pitching_df = MLB_pitching_df[leadingcols + nonleadingcols]
     MLB_pitching_df = MLB_pitching_df.rename(columns={'PlayerName':'Player','TeamNameAbb':'MLBTeam','sp_stuff':'Stuff+',
@@ -66,11 +88,22 @@ def minors_stats_import():
     minors_hitting_response = minors_hitting_request
     minors_hitting_df = pd.DataFrame(minors_hitting_response)
     minors_hitting_df.drop(['Name','Team','TeamName','AffId'],axis=1,inplace=True)
+    
+    # Convert playerids to string
+    minors_hitting_df['playerids'] = minors_hitting_df['playerids'].astype(str)
+    
     minors_hitting_df = (
-        minors_hitting_df[minors_hitting_df['playerids'].isin(ss.idkey['IDFANGRAPHS']) & (minors_hitting_df['PA'] > 0)]
+        minors_hitting_df[minors_hitting_df['playerids'].isin(ss.idkey['IDFANGRAPHS'].astype(str)) & (minors_hitting_df['PA'] > 0)]
         .reset_index(drop=True)
     )
-    minors_hitting_df['Fantrax_ID'] = minors_hitting_df.playerids.map(ss.idkey.set_index('IDFANGRAPHS')['FANTRAXID'])
+    
+    # Create a mapping dictionary with string keys
+    id_mapping = ss.idkey.set_index('IDFANGRAPHS')['FANTRAXID'].to_dict()
+    
+    # Map using string comparison
+    minors_hitting_df['Fantrax_ID'] = minors_hitting_df['playerids'].apply(
+        lambda x: id_mapping.get(x, None)
+    )
 
     nonleadingcols = [col for col in minors_hitting_df.columns if col not in leadingcols]
     minors_hitting_df = minors_hitting_df[leadingcols + nonleadingcols]
@@ -80,11 +113,19 @@ def minors_stats_import():
     minors_pitching_response = minors_pitching_request
     minors_pitching_df = pd.DataFrame(minors_pitching_response)
     minors_pitching_df.drop(['Name','Team','TeamName','AffId'],axis=1,inplace=True)
+    
+    # Convert playerids to string
+    minors_pitching_df['playerids'] = minors_pitching_df['playerids'].astype(str)
+    
     minors_pitching_df = (
-        minors_pitching_df[minors_pitching_df['playerids'].isin(ss.idkey['IDFANGRAPHS']) & (minors_pitching_df['IP'] > 0)]
+        minors_pitching_df[minors_pitching_df['playerids'].isin(ss.idkey['IDFANGRAPHS'].astype(str)) & (minors_pitching_df['IP'] > 0)]
         .reset_index(drop=True)
     )
-    minors_pitching_df['Fantrax_ID'] = minors_pitching_df.playerids.map(ss.idkey.set_index('IDFANGRAPHS')['FANTRAXID'])
+    
+    # Map using string comparison
+    minors_pitching_df['Fantrax_ID'] = minors_pitching_df['playerids'].apply(
+        lambda x: id_mapping.get(x, None)
+    )
 
     nonleadingcols = [col for col in minors_pitching_df.columns if col not in leadingcols]
     minors_pitching_df = minors_pitching_df[leadingcols + nonleadingcols]
@@ -196,11 +237,18 @@ def calculate_team_rate_statistics(df, rate_columns, denominator_col, output_df_
     if denominator_col not in df.columns:
         raise ValueError(f"Denominator column '{denominator_col}' not found in DataFrame.")
 
+    # Check if dataframe is empty or contains no relevant teams
+    if df.empty or 'teamName' not in df.columns or df['teamName'].isna().all():
+        if output_df_name in globals_dict:
+            return globals_dict[output_df_name]
+        else:
+            return pd.DataFrame(columns=['teamName'])
+
     # Group the DataFrame by 'teamName'
     grouped = df.groupby('teamName')
 
     # Initialize a new DataFrame to store the results
-    rate_df = pd.DataFrame({'teamName': grouped.groups.keys()})
+    rate_df = pd.DataFrame({'teamName': list(grouped.groups.keys())})
 
     # Calculate the denominator sums
     denominator_sums = grouped[denominator_col].sum()
@@ -216,18 +264,21 @@ def calculate_team_rate_statistics(df, rate_columns, denominator_col, output_df_
         # Calculate the numerator as the sum of (rate column * denominator column) for each team
         numerator_sums = grouped.apply(lambda x: (x[col] * x[denominator_col]).sum())
 
+        # Create a dictionary for the new DataFrame to ensure 1-dimensional arrays
+        sums_dict = {
+            'teamName': numerator_sums.index.tolist(),
+            'numerator': numerator_sums.values.tolist(),
+            'denominator': denominator_sums.loc[numerator_sums.index].values.tolist()
+        }
+
         # Create a DataFrame to combine numerator and denominator sums
-        sums_df = pd.DataFrame({
-            'teamName': numerator_sums.index,
-            'numerator': numerator_sums.values,
-            'denominator': denominator_sums.values
-        })
+        sums_df = pd.DataFrame(sums_dict)
 
         # Calculate the rate and add it as a new column
         sums_df['rate'] = sums_df['numerator'] / sums_df['denominator']
 
         # Store the calculated rates in rate_df
-        rate_df[col] = sums_df['rate']
+        rate_df[col] = sums_df.set_index('teamName')['rate']
 
     # Merge with existing dataframe if it exists
     if output_df_name in globals_dict:
@@ -250,149 +301,201 @@ def league_selected(league_name):
     league_id = ss.league_list_df.loc[ss.league_list_df['leagueName'] == league_name, 'leagueId'].iloc[0]
 
     [ss.rosters_df, ss.activepitchers, ss.activehitters] = rosters(league_id)
+    
+    # Ensure consistent data types for IDs in rosters
+    if 'id' in ss.rosters_df.columns:
+        ss.rosters_df['id'] = ss.rosters_df['id'].astype(str)
+    if 'id' in ss.activepitchers.columns:
+        ss.activepitchers['id'] = ss.activepitchers['id'].astype(str)
+    if 'id' in ss.activehitters.columns:
+        ss.activehitters['id'] = ss.activehitters['id'].astype(str)
+    
+    # Ensure consistent data types in stored MLB DataFrames
+    if 'Fantrax_ID' in ss.MLB_hitting_df.columns:
+        ss.MLB_hitting_df['Fantrax_ID'] = ss.MLB_hitting_df['Fantrax_ID'].astype(str)
+    if 'Fantrax_ID' in ss.MLB_pitching_df.columns:
+        ss.MLB_pitching_df['Fantrax_ID'] = ss.MLB_pitching_df['Fantrax_ID'].astype(str)
+    
+    # Check for NaN values in Fantrax_ID
+    if ss.MLB_hitting_df['Fantrax_ID'].isna().any():
+        missing_count = ss.MLB_hitting_df['Fantrax_ID'].isna().sum()
+        total_count = len(ss.MLB_hitting_df)
+        st.warning(f"Warning: {missing_count} out of {total_count} MLB hitters missing Fantrax ID ({missing_count/total_count:.1%})")
+    if ss.MLB_pitching_df['Fantrax_ID'].isna().any():
+        missing_count = ss.MLB_pitching_df['Fantrax_ID'].isna().sum()
+        total_count = len(ss.MLB_pitching_df)
+        st.warning(f"Warning: {missing_count} out of {total_count} MLB pitchers missing Fantrax ID ({missing_count/total_count:.1%})")
+    
+    # Merge with rostered hitters - handle case when there might be no matches
+    activehitting = pd.DataFrame()
+    if not ss.MLB_hitting_df.empty and not ss.activehitters.empty:
+        # Convert IDs to string during merge to ensure type consistency
+        activehitting = ss.MLB_hitting_df.merge(
+            ss.activehitters[['id', 'teamName']], 
+            left_on='Fantrax_ID', 
+            right_on='id', 
+            how='inner'
+        )
+        
+        # If we got matches, drop the duplicate ID column
+        if not activehitting.empty:
+            activehitting.drop('id', axis=1, inplace=True)
 
-    rostered_hitters = ss.MLB_hitting_df.merge(
-        ss.rosters_df[['id', 'teamName']], 
-        left_on='Fantrax_ID', 
-        right_on='id', 
-        how='left'
-    )
+    # Merge with rostered pitchers - handle case when there might be no matches
+    activepitching = pd.DataFrame()
+    if not ss.MLB_pitching_df.empty and not ss.activepitchers.empty:
+        # Convert IDs to string during merge to ensure type consistency
+        activepitching = ss.MLB_pitching_df.merge(
+            ss.activepitchers[['id', 'teamName']], 
+            left_on='Fantrax_ID', 
+            right_on='id', 
+            how='inner'
+        )
+        
+        # If we got matches, drop the duplicate ID column
+        if not activepitching.empty:
+            activepitching.drop('id', axis=1, inplace=True)
 
-    rostered_hitters.drop(columns=['id'], inplace=True)
+    # Generate column lists based on dataframe contents
+    # Using the 'or []' syntax to handle empty dataframes
+    teamhitting_vars = activehitting.columns.tolist() if not activehitting.empty else ['Player', 'MLBTeam', 'teamName']
+    teampitching_vars = activepitching.columns.tolist() if not activepitching.empty else ['Player', 'MLBTeam', 'teamName']
 
-    MLBhittingdisplay = (
-        rostered_hitters[rostered_hitters['Fantrax_ID'].isin(ss.rosters_df['id'])]
-        .reset_index(drop=True)
-    )
+    # Lists of columns to exclude
+    hitting_exclude_columns = ['playerid','playerids','Fantrax_ID','Bats','xMLBAMID','Season','AgeR','SeasonMin','SeasonMax','GDP','GB','FB','LD','IFFB',
+                                                        'Balls','Strikes','1B','IFH','BU','BUH','BB/K','IFH%','BUH%','TTO%','wRAA','wRC','Batting','Fielding','Replacement', 
+                                                        'Positional','wLeague','CFraming','Defense','Offense','RAR','WAROld','Dollars','BaseRunning','Spd','wBsR','WPA','-WPA',
+                                                        '+WPA','RE24','REW','pLI','phLI','PH','WPA/LI','Clutch','FB%1','FBv','SL%','SLv','CT%','CTv','CB%','CBv','CH%','CHv','SF%',
+                                                        'SFv','KN%','KNv','XX%','PO%','wFB','wSL','wCT','wCB','wCH','wSF','wKN','wFB/C','wSL/C','wCT/C','wCB/C','wCH/C','wSF/C',
+                                                        'wKN/C','F-Strike%','CStr%','Pull','Cent','Oppo','Soft','Med','Hard','bipCount','Soft%','Med%','UBR','GDPRuns','AVG+',
+                                                        'BB%+','K%+','OBP+','SLG+','ISO+','BABIP+','LD%+','GB%+','FB%+','HRFB%+','Pull%+','Cent%+','Oppo%+','Soft%+',
+                                                        'Med%+','Hard%+','XBR','PPTV','CPTV','BPTV','DSV','DGV','BTV','rPPTV','rCPTV','rBPTV','rDSV','rDGV','rBTV','EBV',
+                                                        'ESV','rFTeamV','rBTeamV','rTV','pfxFA%','pfxFT%','pfxFC%','pfxFS%','pfxFO%','pfxSI%','pfxSL%','pfxCU%','pfxKC%',
+                                                        'pfxEP%','pfxCH%','pfxSC%','pfxKN%','pfxUN%','pfxvFA','pfxvFT','pfxvFC','pfxvFS','pfxvFO','pfxvSI','pfxvSL',
+                                                        'pfxvCU','pfxvKC','pfxvEP','pfxvCH','pfxvSC','pfxvKN','pfxFA-X','pfxFT-X','pfxFC-X','pfxFS-X','pfxFO-X',
+                                                        'pfxSI-X','pfxSL-X','pfxCU-X','pfxKC-X','pfxEP-X','pfxCH-X','pfxSC-X','pfxKN-X','pfxFA-Z','pfxFT-Z',
+                                                        'pfxFC-Z','pfxFS-Z','pfxFO-Z','pfxSI-Z','pfxSL-Z','pfxCU-Z','pfxKC-Z','pfxEP-Z','pfxCH-Z','pfxSC-Z',
+                                                        'pfxKN-Z','pfxwFA','pfxwFT','pfxwFC','pfxwFS','pfxwFO','pfxwSI','pfxwSL','pfxwCU','pfxwKC','pfxwEP',
+                                                        'pfxwCH','pfxwSC','pfxwKN','pfxwFA/C','pfxwFT/C','pfxwFC/C','pfxwFS/C','pfxwFO/C','pfxwSI/C','pfxwSL/C',
+                                                        'pfxwCU/C','pfxwKC/C','pfxwEP/C','pfxwCH/C','pfxwSC/C','pfxwKN/C','pfxO-Swing%','pfxZ-Swing%','pfxSwing%',
+                                                        'pfxO-Contact%','pfxZ-Contact%','pfxContact%','pfxZone%','pfxPace','piCH%','piCS%','piCU%','piFA%',
+                                                        'piFC%','piFS%','piKN%','piSB%','piSI%','piSL%','piXX%','pivCH','pivCS','pivCU','pivFA',
+                                                        'pivFC','pivFS','pivKN','pivSB','pivSI','pivSL','pivXX','piCH-X','piCS-X','piCU-X','piFA-X','piFC-X',
+                                                        'piFS-X','piKN-X','piSB-X','piSI-X','piSL-X','piXX-X','piCH-Z','piCS-Z','piCU-Z','piFA-Z',
+                                                        'piFC-Z','piFS-Z','piKN-Z','piSB-Z','piSI-Z','piSL-Z','piXX-Z','piwCH','piwCS','piwCU','piwFA','piwFC',
+                                                        'piwFS','piwKN','piwSB','piwSI','piwSL','piwXX','piwCH/C','piwCS/C','piwCU/C','piwFA/C','piwFC/C',
+                                                        'piwFS/C','piwKN/C','piwSB/C','piwSI/C','piwSL/C','piwXX/C','piO-Swing%','piZ-Swing%','piSwing%',
+                                                        'piO-Contact%','piZ-Contact%','piContact%','piZone%','piPace','Barrels','HardHit','Q','TG']
+    pitching_exclude_columns = ['playerid','playerids','Fantrax_ID','Throws','xMLBAMID','Season','AgeR','SeasonMin','SeasonMax','IBB','BK','GB','FB','LD','IFFB',
+                                                           'Balls','Strikes','RS','IFH','BU','BUH','IFH%','BUH%','TTO%','CFraming','Starting','Start-IP','Relieving',
+                                                           'Relief-IP','RAR','Dollars','RA9-Wins','LOB-Wins','BIP-Wins','BS-Wins','tERA','WPA','-WPA','+WPA','RE24','REW',
+                                                           'pLI','inLI','gmLI','exLI','Pulls','Games','WPA/LI','Clutch','SL%','SLv','CT%','CTv','CB%','CBv','CH%','CHv',
+                                                           'SF%','SFv','KN%','KNv','XX%','PO%','wFB','wSL','wCT','wCB','wCH','wSF','wKN','wFB/C','wSL/C','wCT/C',
+                                                           'wCB/C','wCH/C','wSF/C','wKN/C','F-Strike%','CStr%','SD','MD','ERA-','FIP-','xFIP-','kwERA','RS/9',
+                                                           'E-F','Pull','Cent','Oppo','Soft','Med','Hard','bipCount','Pull%','Cent%','Oppo%','Soft%','Med%','Hard%',
+                                                           'K/9+','BB/9+','K/BB+','H/9+','HR/9+','AVG+','WHIP+','BABIP+','LOB%+','K%+','BB%+','LD%+','GB%+','FB%+',
+                                                           'HRFB%+','Pull%+','Cent%+','Oppo%+','Soft%+','Med%+','Hard%+','pb_o_CH','pb_s_CH','pb_c_CH','pb_o_CU',
+                                                           'pb_s_CU','pb_c_CU','pb_o_FF','pb_s_FF','pb_c_FF','pb_o_SI','pb_s_SI','pb_c_SI','pb_o_SL','pb_s_SL',
+                                                           'pb_c_SL','pb_o_KC','pb_s_KC','pb_c_KC','pb_o_FC','pb_s_FC','pb_c_FC','pb_o_FS','pb_s_FS',
+                                                           'pb_c_FS','pb_overall','pb_stuff','pb_command','pb_xRV100','pb_ERA','sp_s_CH','sp_l_CH',
+                                                           'sp_p_CH','sp_s_CU','sp_l_CU','sp_p_CU','sp_s_FF','sp_l_FF','sp_p_FF','sp_s_SI',
+                                                           'sp_l_SI','sp_p_SI','sp_s_SL','sp_l_SL','sp_p_SL','sp_s_KC','sp_l_KC','sp_p_KC','sp_s_FC',
+                                                           'sp_l_FC','sp_p_FC','sp_s_FS','sp_l_FS','sp_p_FS','sp_s_FO','sp_l_FO','sp_p_FO','PPTV',
+                                                           'CPTV','BPTV','DSV','DGV','BTV','rPPTV','rCPTV','rBPTV','rDSV','rDGV','rBTV','EBV','ESV',
+                                                           'rFTeamV','rBTeamV','rTV','pfxFA%','pfxFT%','pfxFC%','pfxFS%','pfxFO%','pfxSI%','pfxSL%',
+                                                           'pfxCU%','pfxKC%','pfxEP%','pfxCH%','pfxSC%','pfxKN%','pfxUN%','pfxvFA','pfxvFT','pfxvFC',
+                                                           'pfxvFS','pfxvFO','pfxvSI','pfxvSL','pfxvCU','pfxvKC','pfxvEP','pfxvCH','pfxvSC','pfxvKN',
+                                                           'pfxFA-X','pfxFT-X','pfxFC-X','pfxFS-X','pfxFO-X','pfxSI-X','pfxSL-X','pfxCU-X','pfxKC-X',
+                                                           'pfxEP-X','pfxCH-X','pfxSC-X','pfxKN-X','pfxFA-Z','pfxFT-Z','pfxFC-Z','pfxFS-Z','pfxFO-Z',
+                                                           'pfxSI-Z','pfxSL-Z','pfxCU-Z','pfxKC-Z','pfxEP-Z','pfxCH-Z','pfxSC-Z','pfxKN-Z','pfxwFA',
+                                                           'pfxwFT','pfxwFC','pfxwFS','pfxwFO','pfxwSI','pfxwSL','pfxwCU','pfxwKC','pfxwEP',
+                                                           'pfxwCH','pfxwSC','pfxwKN','pfxwFA/C','pfxwFT/C','pfxwFC/C','pfxwFS/C','pfxwFO/C',
+                                                           'pfxwSI/C','pfxwSL/C','pfxwCU/C','pfxwKC/C','pfxwEP/C','pfxwCH/C','pfxwSC/C','pfxwKN/C',
+                                                           'pfxO-Swing%','pfxZ-Swing%','pfxSwing%','pfxO-Contact%','pfxZ-Contact%','pfxContact%','pfxZone%',
+                                                           'pfxPace','piCH%','piCS%','piCU%','piFA%','piFC%','piFS%','piKN%','piSB%','piSI%',
+                                                           'piSL%','piXX%','pivCH','pivCS','pivCU','pivFA','pivFC','pivFS','pivKN','pivSB',
+                                                           'pivSI','pivSL','pivXX','piCH-X','piCS-X','piCU-X','piFA-X','piFC-X','piFS-X','piKN-X',
+                                                           'piSB-X','piSI-X','piSL-X','piXX-X','piCH-Z','piCS-Z','piCU-Z','piFA-Z','piFC-Z',
+                                                           'piFS-Z','piKN-Z','piSB-Z','piSI-Z','piSL-Z','piXX-Z','piwCH','piwCS','piwCU','piwFA',
+                                                           'piwFC','piwFS','piwKN','piwSB','piwSI','piwSL','piwXX','piwCH/C','piwCS/C',
+                                                           'piwCU/C','piwFA/C','piwFS/C','piwKN/C','piwSB/C','piwSI/C','piwSL/C','piwXX/C',
+                                                           'piO-Swing%','piZ-Swing%','piSwing%','piO-Contact%','piZ-Contact%','piContact%','piZone%',
+                                                           'piPace','Barrels','HardHit','Q','TG']
 
-    ss.MLB_hitting_df = ss.MLB_hitting_df.merge(
-        ss.activehitters[['id', 'teamName']], 
-        left_on='Fantrax_ID', 
-        right_on='id', 
-        how='left'
-    )
+    # Only filter columns if dataframes are not empty
+    if not activehitting.empty:
+        activehitting = activehitting.drop(columns=[col for col in activehitting.columns if col in hitting_exclude_columns], errors='ignore')
+    if not activepitching.empty:
+        activepitching = activepitching.drop(columns=[col for col in activepitching.columns if col in pitching_exclude_columns], errors='ignore')
 
-    # Drop 'id' column after merge if it's no longer needed
-    ss.MLB_hitting_df.drop(columns=['id'], inplace=True)
-
-    activehitting = (
-        ss.MLB_hitting_df[ss.MLB_hitting_df['Fantrax_ID'].isin(ss.activehitters['id'])]
-        .reset_index(drop=True)
-    )
-
-    ss.MLB_pitching_df = ss.MLB_pitching_df.merge(
-        ss.activepitchers[['id', 'teamName']], 
-        left_on='Fantrax_ID', 
-        right_on='id', 
-        how='left'
-    )
-
-    # Drop 'id' column after merge if it's no longer needed
-    ss.MLB_pitching_df.drop(columns=['id'], inplace=True)
-
-    activepitching = (
-        ss.MLB_pitching_df[ss.MLB_pitching_df['Fantrax_ID'].isin(ss.activepitchers['id'])]
-        .reset_index(drop=True)
-    )
-
-    teamhitting_vars = activehitting.columns.tolist()
-    teampitching_vars = activepitching.columns.tolist()
-
-    teamhitting_vars = [e for e in teamhitting_vars if e not in ('playerid','playerids','Fantrax_ID','Bats','xMLBAMID','Season','AgeR','SeasonMin','SeasonMax','GDP','GB','FB','LD','IFFB',
-                                                            'Balls','Strikes','1B','IFH','BU','BUH','BB/K','IFH%','BUH%','TTO%','wRAA','wRC','Batting','Fielding','Replacement',
-                                                            'Positional','wLeague','CFraming','Defense','Offense','RAR','WAROld','Dollars','BaseRunning','Spd','wBsR','WPA','-WPA',
-                                                            '+WPA','RE24','REW','pLI','phLI','PH','WPA/LI','Clutch','FB%1','FBv','SL%','SLv','CT%','CTv','CB%','CBv','CH%','CHv','SF%',
-                                                            'SFv','KN%','KNv','XX%','PO%','wFB','wSL','wCT','wCB','wCH','wSF','wKN','wFB/C','wSL/C','wCT/C','wCB/C','wCH/C','wSF/C',
-                                                            'wKN/C','F-Strike%','CStr%','Pull','Cent','Oppo','Soft','Med','Hard','bipCount','Soft%','Med%','UBR','GDPRuns','AVG+',
-                                                            'BB%+','K%+','OBP+','SLG+','ISO+','BABIP+','LD%+','GB%+','FB%+','HRFB%+','Pull%+','Cent%+','Oppo%+','Soft%+',
-                                                            'Med%+','Hard%+','XBR','PPTV','CPTV','BPTV','DSV','DGV','BTV','rPPTV','rCPTV','rBPTV','rDSV','rDGV','rBTV','EBV',
-                                                            'ESV','rFTeamV','rBTeamV','rTV','pfxFA%','pfxFT%','pfxFC%','pfxFS%','pfxFO%','pfxSI%','pfxSL%','pfxCU%','pfxKC%',
-                                                            'pfxEP%','pfxCH%','pfxSC%','pfxKN%','pfxUN%','pfxvFA','pfxvFT','pfxvFC','pfxvFS','pfxvFO','pfxvSI','pfxvSL',
-                                                            'pfxvCU','pfxvKC','pfxvEP','pfxvCH','pfxvSC','pfxvKN','pfxFA-X','pfxFT-X','pfxFC-X','pfxFS-X','pfxFO-X',
-                                                            'pfxSI-X','pfxSL-X','pfxCU-X','pfxKC-X','pfxEP-X','pfxCH-X','pfxSC-X','pfxKN-X','pfxFA-Z','pfxFT-Z',
-                                                            'pfxFC-Z','pfxFS-Z','pfxFO-Z','pfxSI-Z','pfxSL-Z','pfxCU-Z','pfxKC-Z','pfxEP-Z','pfxCH-Z','pfxSC-Z',
-                                                            'pfxKN-Z','pfxwFA','pfxwFT','pfxwFC','pfxwFS','pfxwFO','pfxwSI','pfxwSL','pfxwCU','pfxwKC','pfxwEP',
-                                                            'pfxwCH','pfxwSC','pfxwKN','pfxwFA/C','pfxwFT/C','pfxwFC/C','pfxwFS/C','pfxwFO/C','pfxwSI/C','pfxwSL/C',
-                                                            'pfxwCU/C','pfxwKC/C','pfxwEP/C','pfxwCH/C','pfxwSC/C','pfxwKN/C','pfxO-Swing%','pfxZ-Swing%','pfxSwing%',
-                                                            'pfxO-Contact%','pfxZ-Contact%','pfxContact%','pfxZone%','pfxPace','piCH%','piCS%','piCU%','piFA%',
-                                                            'piFC%','piFS%','piKN%','piSB%','piSI%','piSL%','piXX%','pivCH','pivCS','pivCU','pivFA',
-                                                            'pivFC','pivFS','pivKN','pivSB','pivSI','pivSL','pivXX','piCH-X','piCS-X','piCU-X','piFA-X','piFC-X',
-                                                            'piFS-X','piKN-X','piSB-X','piSI-X','piSL-X','piXX-X','piCH-Z','piCS-Z','piCU-Z','piFA-Z',
-                                                            'piFC-Z','piFS-Z','piKN-Z','piSB-Z','piSI-Z','piSL-Z','piXX-Z','piwCH','piwCS','piwCU','piwFA','piwFC',
-                                                            'piwFS','piwKN','piwSB','piwSI','piwSL','piwXX','piwCH/C','piwCS/C','piwCU/C','piwFA/C','piwFC/C',
-                                                            'piwFS/C','piwKN/C','piwSB/C','piwSI/C','piwSL/C','piwXX/C','piO-Swing%','piZ-Swing%','piSwing%',
-                                                            'piO-Contact%','piZ-Contact%','piContact%','piZone%','piPace','Barrels','HardHit','Q','TG')]
-    teampitching_vars = [g for g in teampitching_vars if g not in ('playerid','playerids','Fantrax_ID','Throws','xMLBAMID','Season','AgeR','SeasonMin','SeasonMax','IBB','BK','GB','FB','LD','IFFB',
-                                                               'Balls','Strikes','RS','IFH','BU','BUH','IFH%','BUH%','TTO%','CFraming','Starting','Start-IP','Relieving',
-                                                               'Relief-IP','RAR','Dollars','RA9-Wins','LOB-Wins','BIP-Wins','BS-Wins','tERA','WPA','-WPA','+WPA','RE24','REW',
-                                                               'pLI','inLI','gmLI','exLI','Pulls','Games','WPA/LI','Clutch','SL%','SLv','CT%','CTv','CB%','CBv','CH%','CHv',
-                                                               'SF%','SFv','KN%','KNv','XX%','PO%','wFB','wSL','wCT','wCB','wCH','wSF','wKN','wFB/C','wSL/C','wCT/C',
-                                                               'wCB/C','wCH/C','wSF/C','wKN/C','F-Strike%','CStr%','SD','MD','ERA-','FIP-','xFIP-','kwERA','RS/9',
-                                                               'E-F','Pull','Cent','Oppo','Soft','Med','Hard','bipCount','Pull%','Cent%','Oppo%','Soft%','Med%','Hard%',
-                                                               'K/9+','BB/9+','K/BB+','H/9+','HR/9+','AVG+','WHIP+','BABIP+','LOB%+','K%+','BB%+','LD%+','GB%+','FB%+',
-                                                               'HRFB%+','Pull%+','Cent%+','Oppo%+','Soft%+','Med%+','Hard%+','pb_o_CH','pb_s_CH','pb_c_CH','pb_o_CU',
-                                                               'pb_s_CU','pb_c_CU','pb_o_FF','pb_s_FF','pb_c_FF','pb_o_SI','pb_s_SI','pb_c_SI','pb_o_SL','pb_s_SL',
-                                                               'pb_c_SL','pb_o_KC','pb_s_KC','pb_c_KC','pb_o_FC','pb_s_FC','pb_c_FC','pb_o_FS','pb_s_FS',
-                                                               'pb_c_FS','pb_overall','pb_stuff','pb_command','pb_xRV100','pb_ERA','sp_s_CH','sp_l_CH',
-                                                               'sp_p_CH','sp_s_CU','sp_l_CU','sp_p_CU','sp_s_FF','sp_l_FF','sp_p_FF','sp_s_SI',
-                                                               'sp_l_SI','sp_p_SI','sp_s_SL','sp_l_SL','sp_p_SL','sp_s_KC','sp_l_KC','sp_p_KC','sp_s_FC',
-                                                               'sp_l_FC','sp_p_FC','sp_s_FS','sp_l_FS','sp_p_FS','sp_s_FO','sp_l_FO','sp_p_FO','PPTV',
-                                                               'CPTV','BPTV','DSV','DGV','BTV','rPPTV','rCPTV','rBPTV','rDSV','rDGV','rBTV','EBV','ESV',
-                                                               'rFTeamV','rBTeamV','rTV','pfxFA%','pfxFT%','pfxFC%','pfxFS%','pfxFO%','pfxSI%','pfxSL%',
-                                                               'pfxCU%','pfxKC%','pfxEP%','pfxCH%','pfxSC%','pfxKN%','pfxUN%','pfxvFA','pfxvFT','pfxvFC',
-                                                               'pfxvFS','pfxvFO','pfxvSI','pfxvSL','pfxvCU','pfxvKC','pfxvEP','pfxvCH','pfxvSC','pfxvKN',
-                                                               'pfxFA-X','pfxFT-X','pfxFC-X','pfxFS-X','pfxFO-X','pfxSI-X','pfxSL-X','pfxCU-X','pfxKC-X',
-                                                               'pfxEP-X','pfxCH-X','pfxSC-X','pfxKN-X','pfxFA-Z','pfxFT-Z','pfxFC-Z','pfxFS-Z','pfxFO-Z',
-                                                               'pfxSI-Z','pfxSL-Z','pfxCU-Z','pfxKC-Z','pfxEP-Z','pfxCH-Z','pfxSC-Z','pfxKN-Z','pfxwFA',
-                                                               'pfxwFT','pfxwFC','pfxwFS','pfxwFO','pfxwSI','pfxwSL','pfxwCU','pfxwKC','pfxwEP',
-                                                               'pfxwCH','pfxwSC','pfxwKN','pfxwFA/C','pfxwFT/C','pfxwFC/C','pfxwFS/C','pfxwFO/C',
-                                                               'pfxwSI/C','pfxwSL/C','pfxwCU/C','pfxwKC/C','pfxwEP/C','pfxwCH/C','pfxwSC/C','pfxwKN/C',
-                                                               'pfxO-Swing%','pfxZ-Swing%','pfxSwing%','pfxO-Contact%','pfxZ-Contact%','pfxContact%','pfxZone%',
-                                                               'pfxPace','piCH%','piCS%','piCU%','piFA%','piFC%','piFS%','piKN%','piSB%','piSI%',
-                                                               'piSL%','piXX%','pivCH','pivCS','pivCU','pivFA','pivFC','pivFS','pivKN','pivSB',
-                                                               'pivSI','pivSL','pivXX','piCH-X','piCS-X','piCU-X','piFA-X','piFC-X','piFS-X','piKN-X',
-                                                               'piSB-X','piSI-X','piSL-X','piXX-X','piCH-Z','piCS-Z','piCU-Z','piFA-Z','piFC-Z',
-                                                               'piFS-Z','piKN-Z','piSB-Z','piSI-Z','piSL-Z','piXX-Z','piwCH','piwCS','piwCU','piwFA',
-                                                               'piwFC','piwFS','piwKN','piwSB','piwSI','piwSL','piwXX','piwCH/C','piwCS/C',
-                                                               'piwCU/C','piwFA/C','piwFS/C','piwKN/C','piwSB/C','piwSI/C','piwSL/C','piwXX/C',
-                                                               'piO-Swing%','piZ-Swing%','piSwing%','piO-Contact%','piZ-Contact%','piContact%','piZone%',
-                                                               'piPace','Barrels','HardHit','Q','TG')]
-
-    activehitting = activehitting.drop(columns=[col for col in activehitting.columns if col not in teamhitting_vars])
-    activepitching = activepitching.drop(columns=[col for col in activepitching.columns if col not in teampitching_vars])
-
-    MLBhittingdisplay = MLBhittingdisplay.drop(columns=[col for col in MLBhittingdisplay.columns if col not in teamhitting_vars])
+    # Update vars after filtering
+    teamhitting_vars = activehitting.columns.tolist() if not activehitting.empty else ['Player', 'MLBTeam', 'teamName']
+    teampitching_vars = activepitching.columns.tolist() if not activepitching.empty else ['Player', 'MLBTeam', 'teamName']
 
     hitplotvars = [h for h in teamhitting_vars if h not in ('Player','MLBTeam','teamName')]
     pitchplotvars = [p for p in teampitching_vars if p not in ('Player','MLBTeam','teamName')]
 
     ss.globals_dict = {}
 
-    sum_team_stats(activehitting, ['PA','H','2B','3B','HR','R','RBI','BB','SO','SB','CS'], 'teamhitting', ss.globals_dict)
-    calculate_team_rate_statistics(activehitting, ['AVG','SLG','ISO','xAVG','xSLG'], 'AB', 'teamhitting', ss.globals_dict)
-    calculate_team_rate_statistics(activehitting, ['OBP','BB%','K%','wOBA','wRC+','xwOBA'], 'PA', 'teamhitting', ss.globals_dict)
-    calculate_team_rate_statistics(activehitting, ['Contact%'], 'Swings', 'teamhitting', ss.globals_dict)
-    calculate_team_rate_statistics(activehitting, ['EV','Barrel%','HardHit%'], 'Events', 'teamhitting', ss.globals_dict)
-    calculate_team_rate_statistics(activehitting, ['SwStr%','C+SwStr%'], 'Pitches', 'teamhitting', ss.globals_dict)
+    # Only calculate stats if dataframes are not empty
+    if not activehitting.empty and 'teamName' in activehitting.columns:
+        try:
+            sum_team_stats(activehitting, [col for col in ['PA','H','2B','3B','HR','R','RBI','BB','SO','SB','CS'] if col in activehitting.columns], 'teamhitting', ss.globals_dict)
+            if 'AB' in activehitting.columns:
+                calculate_team_rate_statistics(activehitting, [col for col in ['AVG','SLG','ISO','xAVG','xSLG'] if col in activehitting.columns], 'AB', 'teamhitting', ss.globals_dict)
+            if 'PA' in activehitting.columns:
+                calculate_team_rate_statistics(activehitting, [col for col in ['OBP','BB%','K%','wOBA','wRC+','xwOBA'] if col in activehitting.columns], 'PA', 'teamhitting', ss.globals_dict)
+            if 'Swings' in activehitting.columns:
+                calculate_team_rate_statistics(activehitting, [col for col in ['Contact%'] if col in activehitting.columns], 'Swings', 'teamhitting', ss.globals_dict)
+            if 'Events' in activehitting.columns:
+                calculate_team_rate_statistics(activehitting, [col for col in ['EV','Barrel%','HardHit%'] if col in activehitting.columns], 'Events', 'teamhitting', ss.globals_dict)
+            if 'Pitches' in activehitting.columns:
+                calculate_team_rate_statistics(activehitting, [col for col in ['SwStr%','C+SwStr%'] if col in activehitting.columns], 'Pitches', 'teamhitting', ss.globals_dict)
+        except Exception as e:
+            st.error("Error calculating hitting statistics")
+            # Initialize with empty dataframe
+            ss.globals_dict['teamhitting'] = pd.DataFrame(columns=['teamName'])
+    else:
+        # Initialize with empty dataframe
+        ss.globals_dict['teamhitting'] = pd.DataFrame(columns=['teamName'])
 
+    if not activepitching.empty and 'teamName' in activepitching.columns:
+        try:
+            sum_team_stats(activepitching, [col for col in ['W','L','QS','CG','SV','BS','HLD','TIP','TBF','H','ER','HR','BB','SO'] if col in activepitching.columns], 'teampitching', ss.globals_dict)
+            if 'TIP' in activepitching.columns:
+                calculate_team_rate_statistics(activepitching, [col for col in ['ERA','WHIP','FIP','xERA','xFIP','SIERA'] if col in activepitching.columns], 'TIP', 'teampitching', ss.globals_dict)
+            if 'Events' in activepitching.columns:
+                calculate_team_rate_statistics(activepitching, [col for col in ['GB%','FB%','EV','Barrel%','HardHit%'] if col in activepitching.columns], 'Events', 'teampitching', ss.globals_dict)
+            if 'Pitches' in activepitching.columns:
+                calculate_team_rate_statistics(activepitching, [col for col in ['Zone%','SwStr%','C+SwStr%','Stuff+','Location+','Pitching+'] if col in activepitching.columns], 'Pitches', 'teampitching', ss.globals_dict)
+            if 'Swings' in activepitching.columns:
+                calculate_team_rate_statistics(activepitching, [col for col in ['Contact%'] if col in activepitching.columns], 'Swings', 'teampitching', ss.globals_dict)
+            if 'TBF' in activepitching.columns:
+                calculate_team_rate_statistics(activepitching, [col for col in ['K%','BB%'] if col in activepitching.columns], 'TBF', 'teampitching', ss.globals_dict)
+        except Exception as e:
+            st.error("Error calculating pitching statistics")
+            # Initialize with empty dataframe
+            ss.globals_dict['teampitching'] = pd.DataFrame(columns=['teamName'])
+    else:
+        # Initialize with empty dataframe
+        ss.globals_dict['teampitching'] = pd.DataFrame(columns=['teamName'])
 
-    sum_team_stats(ss.MLB_pitching_df, ['W','L','QS','CG','SV','BS','HLD','TIP','TBF','H','ER','HR','BB','SO'], 'teampitching', ss.globals_dict)
-    calculate_team_rate_statistics(ss.MLB_pitching_df, ['ERA','WHIP','FIP','xERA','xFIP','SIERA'], 'TIP', 'teampitching', ss.globals_dict)
-    calculate_team_rate_statistics(ss.MLB_pitching_df, ['GB%','FB%','EV','Barrel%','HardHit%'], 'Events', 'teampitching', ss.globals_dict)
-    calculate_team_rate_statistics(ss.MLB_pitching_df, ['Zone%','SwStr%','C+SwStr%','Stuff+','Location+','Pitching+'], 'Pitches', 'teampitching', ss.globals_dict)
-    calculate_team_rate_statistics(ss.MLB_pitching_df, ['Contact%'], 'Swings', 'teampitching', ss.globals_dict)
-    calculate_team_rate_statistics(ss.MLB_pitching_df, ['K%','BB%'], 'TBF', 'teampitching', ss.globals_dict)
+    # Ensure both dataframes exist in globals_dict
+    if 'teamhitting' not in ss.globals_dict:
+        ss.globals_dict['teamhitting'] = pd.DataFrame(columns=['teamName'])
+    if 'teampitching' not in ss.globals_dict:
+        ss.globals_dict['teampitching'] = pd.DataFrame(columns=['teamName'])
 
-    # print(ss.globals_dict['teamhitting'])
+    # Only reorder columns if dataframes are not empty
+    if not activehitting.empty and 'teamName' in activehitting.columns:
+        teamnamecolumn = activehitting.pop('teamName')
+        activehitting.insert(1, teamnamecolumn.name, teamnamecolumn)
+    if not activepitching.empty and 'teamName' in activepitching.columns:
+        teamnamecolumn = activepitching.pop('teamName')
+        activepitching.insert(1, teamnamecolumn.name, teamnamecolumn)
 
-    teamnamecolumn = MLBhittingdisplay.pop('teamName')
-    MLBhittingdisplay.insert(1,teamnamecolumn.name,teamnamecolumn)
-
-    teamnamecolumn = activepitching.pop('teamName')
-    activepitching.insert(1,teamnamecolumn.name,teamnamecolumn)
-
-    hitplotvars = [e for e in teamhitting_vars if e not in ('ID','Pos','Player','MLBTeam','Eligible','Status','Opponent','FANTRAXID','IDFANGRAPHS','MLBID','team_name')]
-    pitchplotvars = [g for g in teampitching_vars if g not in ('ID','Pos','Player','MLBTeam','Eligible','Status','Opponent','FANTRAXID','IDFANGRAPHS','MLBID','team_name')]
+    hitplotvars = [e for e in hitplotvars if e not in ('ID','Pos','Player','MLBTeam','Eligible','Status','Opponent','FANTRAXID','IDFANGRAPHS','MLBID','team_name')]
+    pitchplotvars = [g for g in pitchplotvars if g not in ('ID','Pos','Player','MLBTeam','Eligible','Status','Opponent','FANTRAXID','IDFANGRAPHS','MLBID','team_name')]
 
     # Filter minors_hitting_df and minors_pitching_df to include only players on the roster
     rostered_minors_hitting = ss.minors_hitting_df.merge(
@@ -419,10 +522,6 @@ def league_selected(league_name):
     # Reorder columns to move 'teamName' to the second position
     rostered_minors_hitting = rostered_minors_hitting[['Player', 'teamName'] + [col for col in rostered_minors_hitting.columns if col != 'teamName' and col != 'Player']]
     rostered_minors_pitching = rostered_minors_pitching[['Player', 'teamName'] + [col for col in rostered_minors_pitching.columns if col != 'teamName' and col != 'Player']]
-
-    # # Update the session state with the filtered dataframes
-    # ss.minors_hitting_df = rostered_minors_hitting
-    # ss.minors_pitching_df = rostered_minors_pitching
 
     tab1, tab2, tab3, tab4 = st.tabs(['League Data','MLB Stats','MiLB Stats','Troubleshoot'])
 
@@ -476,10 +575,16 @@ def league_selected(league_name):
             with col2:
                 majorhit_yaxis = st.selectbox('Y Axis',hitplotvars,index=16)
 
-            majorhitfig = px.scatter(MLBhittingdisplay,x=majorhit_xaxis,y=majorhit_yaxis,color='teamName',
-                                    color_discrete_sequence=px.colors.qualitative.Light24,hover_name='Player')
-            st.plotly_chart(majorhitfig)
-            st.dataframe(MLBhittingdisplay,hide_index=True)
+            try:
+                if not activehitting.empty:
+                    majorhitfig = px.scatter(activehitting,x=majorhit_xaxis,y=majorhit_yaxis,color='teamName',
+                                        color_discrete_sequence=px.colors.qualitative.Light24,hover_name='Player')
+                    st.plotly_chart(majorhitfig)
+                    st.dataframe(activehitting,hide_index=True)
+                else:
+                    st.info("No MLB hitting data available to plot.")
+            except Exception as e:
+                st.error("Error creating MLB hitting plot")
         
         majorhitaxes_select()
 
@@ -492,10 +597,16 @@ def league_selected(league_name):
             with col4:
                 majorpitch_yaxis = st.selectbox('Y Axis',pitchplotvars,index=3)
 
-            majorpitchfig = px.scatter(activepitching,x=majorpitch_xaxis,y=majorpitch_yaxis,color='teamName',
-                                    color_discrete_sequence=px.colors.qualitative.Light24,hover_name='Player')
-            st.plotly_chart(majorpitchfig)
-            st.dataframe(activepitching,hide_index=True)
+            try:
+                if not activepitching.empty:
+                    majorpitchfig = px.scatter(activepitching,x=majorpitch_xaxis,y=majorpitch_yaxis,color='teamName',
+                                        color_discrete_sequence=px.colors.qualitative.Light24,hover_name='Player')
+                    st.plotly_chart(majorpitchfig)
+                    st.dataframe(activepitching,hide_index=True)
+                else:
+                    st.info("No MLB pitching data available to plot.")
+            except Exception as e:
+                st.error("Error creating MLB pitching plot")
         
         majorpitchaxes_select()
     
@@ -509,10 +620,16 @@ def league_selected(league_name):
             with col2:
                 minorhit_yaxis = st.selectbox('Y Axis',hitplotvars,index=16,key='minor_hit_y')
 
-            minorhitfig = px.scatter(rostered_minors_hitting,x=minorhit_xaxis,y=minorhit_yaxis,color='teamName',
-                                    color_discrete_sequence=px.colors.qualitative.Light24,hover_name='Player')
-            st.plotly_chart(minorhitfig)
-            st.dataframe(rostered_minors_hitting,hide_index=True)
+            try:
+                if not rostered_minors_hitting.empty:
+                    minorhitfig = px.scatter(rostered_minors_hitting,x=minorhit_xaxis,y=minorhit_yaxis,color='teamName',
+                                        color_discrete_sequence=px.colors.qualitative.Light24,hover_name='Player')
+                    st.plotly_chart(minorhitfig)
+                    st.dataframe(rostered_minors_hitting,hide_index=True)
+                else:
+                    st.info("No minor league hitting data available to plot.")
+            except Exception as e:
+                st.error("Error creating minor league hitting plot")
         
         minorhitaxes_select()
 
@@ -525,10 +642,16 @@ def league_selected(league_name):
             with col4:
                 minorpitch_yaxis = st.selectbox('Y Axis',pitchplotvars,index=3,key='minor_pitch_y')
 
-            minorpitchfig = px.scatter(rostered_minors_pitching,x=minorpitch_xaxis,y=minorpitch_yaxis,color='teamName',
-                                    color_discrete_sequence=px.colors.qualitative.Light24,hover_name='Player')
-            st.plotly_chart(minorpitchfig)
-            st.dataframe(rostered_minors_pitching,hide_index=True)
+            try:
+                if not rostered_minors_pitching.empty:
+                    minorpitchfig = px.scatter(rostered_minors_pitching,x=minorpitch_xaxis,y=minorpitch_yaxis,color='teamName',
+                                        color_discrete_sequence=px.colors.qualitative.Light24,hover_name='Player')
+                    st.plotly_chart(minorpitchfig)
+                    st.dataframe(rostered_minors_pitching,hide_index=True)
+                else:
+                    st.info("No minor league pitching data available to plot.")
+            except Exception as e:
+                st.error("Error creating minor league pitching plot")
         
         minorpitchaxes_select()
 
@@ -565,9 +688,12 @@ def normalize_json_response(response, key):
 
 if 'idkey' not in ss:
     try:
-        ss.idkey = pd.read_csv('C:/Users/Brett/Fantasy Baseball Practice/Apps/Fantrax_Leagues_Dashboard/Player ID Key.csv')
-    except FileNotFoundError:
-        st.error("Player ID Key file not found.")
+        ss.idkey = pd.read_csv('https://raw.githubusercontent.com/bamc021/Fantrax_Leagues_Dashboard/refs/heads/main/Player%20ID%20Key.csv')
+        # Convert IDFANGRAPHS to string immediately after loading
+        ss.idkey['IDFANGRAPHS'] = ss.idkey['IDFANGRAPHS'].astype(str)
+    except Exception as e:
+        st.error(f"Error loading Player ID Key file: {str(e)}")
+        ss.idkey = pd.DataFrame()  # Initialize empty DataFrame to prevent further errors
 
 [MLB_pitching_df,MLB_hitting_df,minors_pitching_df, minors_hitting_df,league_list_df] = app_startup()
 
