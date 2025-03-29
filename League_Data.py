@@ -203,16 +203,53 @@ def rosters(league_id):
     return rosters_df, activepitchers, activehitters
 
 def sum_team_stats(df, columns_to_sum, output_df_name, globals_dict):
+    """
+    Sum specified columns grouped by 'teamName'.
+    
+    Parameters:
+    - df: DataFrame containing the data to sum
+    - columns_to_sum: List of columns to sum
+    - output_df_name: Name to use when storing result in globals_dict
+    - globals_dict: Dictionary to store results
+    
+    Returns:
+    - DataFrame with summed statistics
+    """
+    # Check if dataframe is empty or contains no relevant teams/columns
+    if df.empty or 'teamName' not in df.columns:
+        if output_df_name in globals_dict:
+            return globals_dict[output_df_name]
+        else:
+            return pd.DataFrame(columns=['teamName'])
+            
+    # Only sum columns that exist in the dataframe
+    valid_columns = [col for col in columns_to_sum if col in df.columns]
+    
+    if not valid_columns:
+        # If no valid columns, return existing data or empty dataframe
+        if output_df_name in globals_dict:
+            return globals_dict[output_df_name]
+        else:
+            return pd.DataFrame(columns=['teamName'])
+    
     # Sum specified columns grouped by 'teamName'
-    summed_df = df.groupby('teamName')[columns_to_sum].sum().reset_index()
+    summed_df = df.groupby('teamName')[valid_columns].sum().reset_index()
     
     # Check if output dataframe already exists
     if output_df_name in globals_dict:
         existing_df = globals_dict[output_df_name]
-        existing_df = existing_df.set_index('teamName')
-        summed_df = summed_df.set_index('teamName')
-        existing_df.update(summed_df)
-        summed_df = existing_df.reset_index()
+        
+        if not existing_df.empty and 'teamName' in existing_df.columns:
+            # Set teamName as index for easier updating
+            existing_df_indexed = existing_df.set_index('teamName')
+            summed_df_indexed = summed_df.set_index('teamName')
+            
+            # Update existing columns and add new ones
+            for col in summed_df_indexed.columns:
+                existing_df_indexed[col] = summed_df_indexed[col]
+                
+            # Reset index and update summed_df
+            summed_df = existing_df_indexed.reset_index()
     
     # Store in globals dictionary
     globals_dict[output_df_name] = summed_df
@@ -244,53 +281,73 @@ def calculate_team_rate_statistics(df, rate_columns, denominator_col, output_df_
         else:
             return pd.DataFrame(columns=['teamName'])
 
-    # Group the DataFrame by 'teamName'
+    # Initialize results dataframe
+    rate_df = pd.DataFrame()
+    
+    # Handle columns differently based on their nature
+    # For percentage stats (like AVG, OBP, etc.), we need to calculate the weighted average
+    # For raw rate stats (like wRC+), we can take a simpler weighted average
+
+    # Group by team
     grouped = df.groupby('teamName')
-
-    # Initialize a new DataFrame to store the results
-    rate_df = pd.DataFrame({'teamName': list(grouped.groups.keys())})
-
-    # Calculate the denominator sums
-    denominator_sums = grouped[denominator_col].sum()
-
-    # Avoid division by zero by replacing zeros with NaN
-    denominator_sums.replace(0, float('nan'), inplace=True)
-
-    # Calculate rate statistics for each specified column
+    
+    # Get team names as a list to initialize the results DataFrame
+    team_names = list(grouped.groups.keys())
+    rate_df['teamName'] = team_names
+    
+    # Get denominator sums for each team
+    denominator_sums = grouped[denominator_col].sum().reset_index()
+    denominator_dict = dict(zip(denominator_sums['teamName'], denominator_sums[denominator_col]))
+    
+    # Process each rate column
     for col in rate_columns:
         if col not in df.columns:
-            continue  # Skip if the column is not found
+            continue
+            
+        # For each team, calculate weighted average based on the denominator
+        team_values = {}
         
-        # Calculate the numerator as the sum of (rate column * denominator column) for each team
-        numerator_sums = grouped.apply(lambda x: (x[col] * x[denominator_col]).sum())
-
-        # Create a dictionary for the new DataFrame to ensure 1-dimensional arrays
-        sums_dict = {
-            'teamName': numerator_sums.index.tolist(),
-            'numerator': numerator_sums.values.tolist(),
-            'denominator': denominator_sums.loc[numerator_sums.index].values.tolist()
-        }
-
-        # Create a DataFrame to combine numerator and denominator sums
-        sums_df = pd.DataFrame(sums_dict)
-
-        # Calculate the rate and add it as a new column
-        sums_df['rate'] = sums_df['numerator'] / sums_df['denominator']
-
-        # Store the calculated rates in rate_df
-        rate_df[col] = sums_df.set_index('teamName')['rate']
-
+        for team in team_names:
+            team_data = df[df['teamName'] == team]
+            
+            if team_data.empty or denominator_dict[team] == 0:
+                team_values[team] = float('nan')
+                continue
+                
+            # For stats that are already rates (like AVG, OBP, wRC+, etc.)
+            # Calculate weighted average: sum(stat * denominator) / sum(denominator)
+            team_values[team] = (team_data[col] * team_data[denominator_col]).sum() / denominator_dict[team]
+        
+        # Add column to results
+        rate_df[col] = [team_values[team] for team in team_names]
+    
     # Merge with existing dataframe if it exists
     if output_df_name in globals_dict:
         existing_df = globals_dict[output_df_name]
-        merged_df = existing_df.merge(rate_df, on='teamName', how='left')
+        # If the existing df has columns we need to preserve, merge on teamName
+        if len(existing_df.columns) > 1:  # More than just teamName column
+            # Set teamName as index for both dataframes
+            existing_df_indexed = existing_df.set_index('teamName')
+            rate_df_indexed = rate_df.set_index('teamName')
+            
+            # Update existing dataframe with new values
+            for col in rate_df_indexed.columns:
+                if col in existing_df_indexed.columns:
+                    existing_df_indexed[col] = rate_df_indexed[col]
+                else:
+                    existing_df_indexed[col] = rate_df_indexed[col]
+            
+            # Reset index and return
+            result_df = existing_df_indexed.reset_index()
+        else:
+            result_df = rate_df
     else:
-        merged_df = rate_df
-
-    # Store the results in the globals dictionary
-    globals_dict[output_df_name] = merged_df
-
-    return merged_df
+        result_df = rate_df
+    
+    # Store in globals dictionary
+    globals_dict[output_df_name] = result_df
+    
+    return result_df
 
 def league_selected(league_name):
     # Ensure rosters_df is available before proceeding
@@ -440,42 +497,96 @@ def league_selected(league_name):
     # Only calculate stats if dataframes are not empty
     if not activehitting.empty and 'teamName' in activehitting.columns:
         try:
-            sum_team_stats(activehitting, [col for col in ['PA','H','2B','3B','HR','R','RBI','BB','SO','SB','CS'] if col in activehitting.columns], 'teamhitting', ss.globals_dict)
+            # First calculate all sum statistics
+            sum_columns = [col for col in ['PA', 'AB', 'H', '2B', '3B', 'HR', 'R', 'RBI', 'BB', 'SO', 'SB', 'CS', 'Pitches', 'Swings', 'Events'] 
+                          if col in activehitting.columns]
+            if sum_columns:
+                sum_team_stats(activehitting, sum_columns, 'teamhitting', ss.globals_dict)
+            
+            # Calculate rate statistics with proper error handling
             if 'AB' in activehitting.columns:
-                calculate_team_rate_statistics(activehitting, [col for col in ['AVG','SLG','ISO','xAVG','xSLG'] if col in activehitting.columns], 'AB', 'teamhitting', ss.globals_dict)
+                ab_rate_columns = [col for col in ['AVG', 'SLG', 'ISO', 'xAVG', 'xSLG'] 
+                                 if col in activehitting.columns]
+                if ab_rate_columns:
+                    calculate_team_rate_statistics(activehitting, ab_rate_columns, 'AB', 'teamhitting', ss.globals_dict)
+            
             if 'PA' in activehitting.columns:
-                calculate_team_rate_statistics(activehitting, [col for col in ['OBP','BB%','K%','wOBA','wRC+','xwOBA'] if col in activehitting.columns], 'PA', 'teamhitting', ss.globals_dict)
-            if 'Swings' in activehitting.columns:
-                calculate_team_rate_statistics(activehitting, [col for col in ['Contact%'] if col in activehitting.columns], 'Swings', 'teamhitting', ss.globals_dict)
-            if 'Events' in activehitting.columns:
-                calculate_team_rate_statistics(activehitting, [col for col in ['EV','Barrel%','HardHit%'] if col in activehitting.columns], 'Events', 'teamhitting', ss.globals_dict)
-            if 'Pitches' in activehitting.columns:
-                calculate_team_rate_statistics(activehitting, [col for col in ['SwStr%','C+SwStr%'] if col in activehitting.columns], 'Pitches', 'teamhitting', ss.globals_dict)
+                pa_rate_columns = [col for col in ['OBP', 'BB%', 'K%', 'wOBA', 'wRC+', 'xwOBA'] 
+                                 if col in activehitting.columns]
+                if pa_rate_columns:
+                    calculate_team_rate_statistics(activehitting, pa_rate_columns, 'PA', 'teamhitting', ss.globals_dict)
+            
+            if 'Swings' in activehitting.columns and 'Swings' in sum_columns:
+                swing_rate_columns = [col for col in ['Contact%'] 
+                                   if col in activehitting.columns]
+                if swing_rate_columns:
+                    calculate_team_rate_statistics(activehitting, swing_rate_columns, 'Swings', 'teamhitting', ss.globals_dict)
+            
+            if 'Events' in activehitting.columns and 'Events' in sum_columns:
+                event_rate_columns = [col for col in ['EV', 'Barrel%', 'HardHit%'] 
+                                   if col in activehitting.columns]
+                if event_rate_columns:
+                    calculate_team_rate_statistics(activehitting, event_rate_columns, 'Events', 'teamhitting', ss.globals_dict)
+            
+            if 'Pitches' in activehitting.columns and 'Pitches' in sum_columns:
+                pitch_rate_columns = [col for col in ['SwStr%', 'C+SwStr%'] 
+                                   if col in activehitting.columns]
+                if pitch_rate_columns:
+                    calculate_team_rate_statistics(activehitting, pitch_rate_columns, 'Pitches', 'teamhitting', ss.globals_dict)
+            
         except Exception as e:
-            st.error("Error calculating hitting statistics")
-            # Initialize with empty dataframe
-            ss.globals_dict['teamhitting'] = pd.DataFrame(columns=['teamName'])
+            st.error(f"Error calculating hitting statistics: {str(e)}")
+            # Initialize with empty dataframe if it doesn't exist
+            if 'teamhitting' not in ss.globals_dict:
+                ss.globals_dict['teamhitting'] = pd.DataFrame(columns=['teamName'])
     else:
         # Initialize with empty dataframe
         ss.globals_dict['teamhitting'] = pd.DataFrame(columns=['teamName'])
 
     if not activepitching.empty and 'teamName' in activepitching.columns:
         try:
-            sum_team_stats(activepitching, [col for col in ['W','L','QS','CG','SV','BS','HLD','TIP','TBF','H','ER','HR','BB','SO'] if col in activepitching.columns], 'teampitching', ss.globals_dict)
-            if 'TIP' in activepitching.columns:
-                calculate_team_rate_statistics(activepitching, [col for col in ['ERA','WHIP','FIP','xERA','xFIP','SIERA'] if col in activepitching.columns], 'TIP', 'teampitching', ss.globals_dict)
-            if 'Events' in activepitching.columns:
-                calculate_team_rate_statistics(activepitching, [col for col in ['GB%','FB%','EV','Barrel%','HardHit%'] if col in activepitching.columns], 'Events', 'teampitching', ss.globals_dict)
-            if 'Pitches' in activepitching.columns:
-                calculate_team_rate_statistics(activepitching, [col for col in ['Zone%','SwStr%','C+SwStr%','Stuff+','Location+','Pitching+'] if col in activepitching.columns], 'Pitches', 'teampitching', ss.globals_dict)
-            if 'Swings' in activepitching.columns:
-                calculate_team_rate_statistics(activepitching, [col for col in ['Contact%'] if col in activepitching.columns], 'Swings', 'teampitching', ss.globals_dict)
-            if 'TBF' in activepitching.columns:
-                calculate_team_rate_statistics(activepitching, [col for col in ['K%','BB%'] if col in activepitching.columns], 'TBF', 'teampitching', ss.globals_dict)
+            # First calculate all sum statistics
+            sum_columns = [col for col in ['W', 'L', 'QS', 'CG', 'SV', 'BS', 'HLD', 'IP', 'TIP', 'TBF', 'H', 'ER', 'HR', 'BB', 'SO', 'Pitches', 'Swings', 'Events'] 
+                          if col in activepitching.columns]
+            if sum_columns:
+                sum_team_stats(activepitching, sum_columns, 'teampitching', ss.globals_dict)
+            
+            # Calculate rate statistics with proper error handling
+            if 'TIP' in activepitching.columns and 'TIP' in sum_columns:
+                tip_rate_columns = [col for col in ['ERA', 'WHIP', 'FIP', 'xERA', 'xFIP', 'SIERA'] 
+                                 if col in activepitching.columns]
+                if tip_rate_columns:
+                    calculate_team_rate_statistics(activepitching, tip_rate_columns, 'TIP', 'teampitching', ss.globals_dict)
+            
+            if 'Events' in activepitching.columns and 'Events' in sum_columns:
+                event_rate_columns = [col for col in ['GB%', 'FB%', 'EV', 'Barrel%', 'HardHit%'] 
+                                   if col in activepitching.columns]
+                if event_rate_columns:
+                    calculate_team_rate_statistics(activepitching, event_rate_columns, 'Events', 'teampitching', ss.globals_dict)
+            
+            if 'Pitches' in activepitching.columns and 'Pitches' in sum_columns:
+                pitch_rate_columns = [col for col in ['Zone%', 'SwStr%', 'C+SwStr%', 'Stuff+', 'Location+', 'Pitching+'] 
+                                   if col in activepitching.columns]
+                if pitch_rate_columns:
+                    calculate_team_rate_statistics(activepitching, pitch_rate_columns, 'Pitches', 'teampitching', ss.globals_dict)
+            
+            if 'Swings' in activepitching.columns and 'Swings' in sum_columns:
+                swing_rate_columns = [col for col in ['Contact%'] 
+                                   if col in activepitching.columns]
+                if swing_rate_columns:
+                    calculate_team_rate_statistics(activepitching, swing_rate_columns, 'Swings', 'teampitching', ss.globals_dict)
+            
+            if 'TBF' in activepitching.columns and 'TBF' in sum_columns:
+                tbf_rate_columns = [col for col in ['K%', 'BB%'] 
+                                 if col in activepitching.columns]
+                if tbf_rate_columns:
+                    calculate_team_rate_statistics(activepitching, tbf_rate_columns, 'TBF', 'teampitching', ss.globals_dict)
+            
         except Exception as e:
-            st.error("Error calculating pitching statistics")
-            # Initialize with empty dataframe
-            ss.globals_dict['teampitching'] = pd.DataFrame(columns=['teamName'])
+            st.error(f"Error calculating pitching statistics: {str(e)}")
+            # Initialize with empty dataframe if it doesn't exist
+            if 'teampitching' not in ss.globals_dict:
+                ss.globals_dict['teampitching'] = pd.DataFrame(columns=['teamName'])
     else:
         # Initialize with empty dataframe
         ss.globals_dict['teampitching'] = pd.DataFrame(columns=['teamName'])
@@ -534,9 +645,9 @@ def league_selected(league_name):
                 hitting_columns = [col for col in ss.globals_dict['teamhitting'].columns if col not in ['Name', 'teamName']]
                 col1_1,col1_2=st.columns(2)
                 with col1_1:
-                    ss.teamhit_xaxis = st.selectbox('X Axis',hitting_columns,index=4)
+                    ss.teamhit_xaxis = st.selectbox('X Axis',hitting_columns,index=5)
                 with col1_2:
-                    ss.teamhit_yaxis = st.selectbox('Y Axis',hitting_columns,index=9)
+                    ss.teamhit_yaxis = st.selectbox('Y Axis',hitting_columns,index=10)
                 teamhitfig = px.scatter(ss.globals_dict['teamhitting'],x=ss.teamhit_xaxis,y=ss.teamhit_yaxis,
                                         color='teamName',color_discrete_sequence=px.colors.qualitative.Light24)
                 st.plotly_chart(teamhitfig)
