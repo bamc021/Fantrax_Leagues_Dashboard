@@ -84,19 +84,25 @@ def MLB_stats_import():
 def minors_stats_import():
     leadingcols = ['PlayerName','AffAbbName','aLevel','Age','playerids','Fantrax_ID']
 
-    minors_hitting_request = safe_request(url="https://www.fangraphs.com/api/leaders/minor-league/data?pos=all&level=0&lg=2,4,5,6,7,8,9,10,11,14,12,13,15,16,17,18,30,32&stats=bba&qual=0&type=0&team=&season=2025&seasonEnd=2025&org=&ind=0&splitTeam=false")
+    minors_hitting_request = safe_request(url="https://www.fangraphs.com/api/leaders/minor-league/data?pos=all&level=0&lg=2,4,5,6,7,8,9,10,11,14,12,13,15,16,17,18,30,32&stats=bat&qual=0&type=1&team=&season=2025&seasonEnd=2025&org=&ind=0&splitTeam=false")
     minors_hitting_response = minors_hitting_request
     minors_hitting_df = pd.DataFrame(minors_hitting_response)
     minors_hitting_df.drop(['Name','Team','TeamName','AffId'],axis=1,inplace=True)
     
     # Convert playerids to string
     minors_hitting_df['playerids'] = minors_hitting_df['playerids'].astype(str)
+
+    # Check if 'PA' column exists before filtering
+    if 'PA' not in minors_hitting_df.columns:
+        st.warning("Column 'PA' is missing from the minors hitting data.")
+        print("Available columns:", minors_hitting_df.columns)  # Debugging information
+        return None  # or handle accordingly    
     
     minors_hitting_df = (
         minors_hitting_df[minors_hitting_df['playerids'].isin(ss.idkey['IDFANGRAPHS'].astype(str)) & (minors_hitting_df['PA'] > 0)]
         .reset_index(drop=True)
     )
-    
+
     # Create a mapping dictionary with string keys
     id_mapping = ss.idkey.set_index('IDFANGRAPHS')['FANTRAXID'].to_dict()
     
