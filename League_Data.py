@@ -21,7 +21,7 @@ def safe_request(url, method='get', **kwargs):
 def MLB_stats_import():
     leadingcols = ['PlayerName','TeamNameAbb','playerid','Fantrax_ID']
 
-    MLB_hitting_request = safe_request(url="https://www.fangraphs.com/api/leaders/major-league/data?age=&pos=all&stats=bat&lg=all&qual=0&season=2025&season1=2025&startdate=2025-03-01&enddate=2025-11-01&month=0&hand=&team=0&pageitems=30&pagenum=2&ind=0&rost=0&players=&type=8&postseason=&sortdir=default&sortstat=WAR")
+    MLB_hitting_request = safe_request(url="https://www.fangraphs.com/api/leaders/major-league/data?age=&pos=all&stats=bat&lg=all&qual=0&season=2025&season1=2025&startdate=2025-03-01&enddate=2025-11-01&month=0&hand=&team=0&pageitems=2000000000&pagenum=1&ind=0&rost=0&players=&type=8&postseason=&sortdir=default&sortstat=WAR")
     MLB_hitting_response = MLB_hitting_request
     MLB_hitting_df = pd.json_normalize(MLB_hitting_response['data'])
     
@@ -54,7 +54,7 @@ def MLB_stats_import():
     MLB_hitting_df = MLB_hitting_df.rename(columns={'PlayerName':'Player','TeamNameAbb':'MLBTeam'})
 
     # Repeat for pitching
-    MLB_pitching_request = safe_request(url="https://www.fangraphs.com/api/leaders/major-league/data?age=&pos=all&stats=pit&lg=all&qual=0&season=2025&season1=2025&startdate=2025-03-01&enddate=2025-11-01&month=0&hand=&team=0&pageitems=30&pagenum=2&ind=0&rost=0&players=&type=8&postseason=&sortdir=default&sortstat=WAR")
+    MLB_pitching_request = safe_request(url="https://www.fangraphs.com/api/leaders/major-league/data?age=&pos=all&stats=pit&lg=all&qual=0&season=2025&season1=2025&startdate=2025-03-01&enddate=2025-11-01&month=0&hand=&team=0&pageitems=2000000000&pagenum=1&ind=0&rost=0&players=&type=8&postseason=&sortdir=default&sortstat=WAR")
     MLB_pitching_response = MLB_pitching_request
     MLB_pitching_df = pd.json_normalize(MLB_pitching_response['data'])
     MLB_pitching_df.drop(['Name','Team','TeamName','PlayerNameRoute','position','teamid'],axis=1,inplace=True)
